@@ -20,7 +20,13 @@ export srand,
        GLOBAL_RNG, randjump
 
 
+## general definitions
+
 abstract type AbstractRNG end
+
+defaultRNG() = GLOBAL_RNG # defined in RNGs.jl
+
+### floats
 
 abstract type FloatInterval{T<:AbstractFloat} end
 
@@ -34,7 +40,109 @@ const Close1Open2_64   = Close1Open2{Float64}
 CloseOpen(  ::Type{T}=Float64) where {T<:AbstractFloat} = CloseOpen{T}()
 Close1Open2(::Type{T}=Float64) where {T<:AbstractFloat} = Close1Open2{T}()
 
+Base.eltype(::Type{FloatInterval{T}}) where {T<:AbstractFloat} = T
+
 const BitFloatType = Union{Type{Float16},Type{Float32},Type{Float64}}
+
+### State
+
+abstract type State end
+
+# temporarily for BaseBenchmarks
+RangeGenerator(x) = State(defaultRNG(), x)
+
+# In some cases, when only 1 random value is to be generated,
+# the optimal sampler can be different than if multiple values
+# have to be generated. Hence a `Repetition` parameter is used
+# to choose the best one depending on the need.
+const Repetition = Union{Val{1},Val{Inf}}
+
+# these default fall-back for all RNGs would be nice,
+# but generate difficult-to-solve ambiguities
+# State(::AbstractRNG, X, ::Val{Inf}) = State(X)
+# State(::AbstractRNG, ::Type{X}, ::Val{Inf}) where {X} = State(X)
+
+State(rng::AbstractRNG, st::State, ::Repetition) =
+    throw(ArgumentError("State for this object is not defined"))
+
+# default shortcut for the general case
+State(rng::AbstractRNG, X) = State(rng, X, Val(Inf))
+State(rng::AbstractRNG, ::Type{X}) where {X} = State(rng, X, Val(Inf))
+
+#### pre-defined useful State subtypes
+
+# default fall-back for types
+struct StateType{T} <: State end
+
+State(::AbstractRNG, ::Type{T}, ::Repetition) where {T} = StateType{T}()
+
+Base.getindex(st::StateType{T}) where {T} = T
+
+# default fall-back for values
+struct StateTrivial{T} <: State
+    self::T
+end
+
+State(::AbstractRNG, X, ::Repetition) = StateTrivial(X)
+
+Base.getindex(st::StateTrivial) = st.self
+
+struct StateSimple{T,S} <: State
+    self::T
+    state::S
+end
+
+Base.getindex(st::StateSimple) = st.self
+
+
+### machinery for generation with State
+
+#### scalars
+
+rand(rng::AbstractRNG, X) = rand(rng, State(rng, X, Val(1)))
+rand(rng::AbstractRNG=GLOBAL_RNG, ::Type{X}=Float64) where {X} =
+    rand(rng, State(rng, X, Val(1)))
+
+rand(X) = rand(GLOBAL_RNG, X)
+rand(::Type{X}) where X = rand(GLOBAL_RNG, X)
+
+#### arrays
+
+rand!(A::AbstractArray{T}, X) where {T} = rand!(GLOBAL_RNG, A, X)
+rand!(A::AbstractArray{T}, ::Type{X}=T) where {T,X} = rand!(GLOBAL_RNG, A, X)
+
+rand!(rng::AbstractRNG, A::AbstractArray{T}, X) where {T} = rand!(rng, A, State(rng, X))
+rand!(rng::AbstractRNG, A::AbstractArray{T}, ::Type{X}=T) where {T,X} = rand!(rng, A, State(rng, X))
+
+function rand!(rng::AbstractRNG, A::AbstractArray{T}, st::State) where T
+    for i in eachindex(A)
+        @inbounds A[i] = rand(rng, st)
+    end
+    A
+end
+
+rand(r::AbstractRNG, dims::Dims)       = rand(r, Float64, dims)
+rand(                dims::Dims)       = rand(GLOBAL_RNG, dims)
+rand(r::AbstractRNG, dims::Integer...) = rand(r, Dims(dims))
+rand(                dims::Integer...) = rand(Dims(dims))
+
+rand(r::AbstractRNG, X, dims::Dims)  = rand!(r, Array{eltype(X)}(dims), X)
+rand(                X, dims::Dims)  = rand(GLOBAL_RNG, X, dims)
+
+rand(r::AbstractRNG, X, d::Integer, dims::Integer...) = rand(r, X, Dims((d, dims...)))
+rand(                X, d::Integer, dims::Integer...) = rand(X, Dims((d, dims...)))
+# note: the above methods would trigger an ambiguity warning if d was not separated out:
+# rand(r, ()) would match both this method and rand(r, dims::Dims)
+# moreover, a call like rand(r, NotImplementedType()) would be an infinite loop
+
+rand(r::AbstractRNG, ::Type{X}, dims::Dims) where {X} = rand!(r, Array{eltype(X)}(dims), X)
+rand(                ::Type{X}, dims::Dims) where {X} = rand(GLOBAL_RNG, X, dims)
+
+rand(r::AbstractRNG, ::Type{X}, d::Integer, dims::Integer...) where {X} = rand(r, X, Dims((d, dims...)))
+rand(                ::Type{X}, d::Integer, dims::Integer...) where {X} = rand(X, Dims((d, dims...)))
+
+
+## __init__ & include
 
 function __init__()
     try
