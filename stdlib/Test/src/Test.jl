@@ -37,11 +37,11 @@ function ip_matches_func_and_name(ip, func::Symbol, dir::String, file::String)
 end
 
 function scrub_backtrace(bt)
-    do_test_ind = findfirst(addr->ip_matches_func_and_name(addr, :do_test, ".", "test.jl"), bt)
+    do_test_ind = findfirst(addr->ip_matches_func_and_name(addr, :do_test, @__DIR__, "Test.jl"), bt)
     if do_test_ind != 0 && length(bt) > do_test_ind
         bt = bt[do_test_ind + 1:end]
     end
-    name_ind = findfirst(addr->ip_matches_func_and_name(addr, Symbol("macro expansion"), ".", "test.jl"), bt)
+    name_ind = findfirst(addr->ip_matches_func_and_name(addr, Symbol("macro expansion"), @__DIR__, "Test.jl"), bt)
     if name_ind != 0 && length(bt) != 0
         bt = bt[1:name_ind]
     end
